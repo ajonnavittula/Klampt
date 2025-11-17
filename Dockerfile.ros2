@@ -38,10 +38,9 @@ RUN python3 -m pip install --upgrade pip && \
 RUN git config --global url."https://github.com/".insteadOf git@github.com:
 
 # Build and install KrisLibrary once so it is available system-wide
-RUN git clone https://github.com/krishauser/KrisLibrary.git /tmp/KrisLibrary && \
-    cmake -S /tmp/KrisLibrary -B /tmp/KrisLibrary/build -DCMAKE_BUILD_TYPE=Release && \
-    cmake --build /tmp/KrisLibrary/build --target install -- -j$(nproc) && \
-    rm -rf /tmp/KrisLibrary
+RUN git clone https://github.com/krishauser/KrisLibrary.git /opt/KrisLibrary \
+    && cmake -S /opt/KrisLibrary -B /opt/KrisLibrary/build -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build /opt/KrisLibrary/build --target install -- -j$(nproc)
 
 # Build and install the bundled ODE dependency
 COPY Cpp/Dependencies/ode-0.14 /tmp/ode-0.14
