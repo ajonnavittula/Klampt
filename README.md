@@ -24,9 +24,9 @@ More information can be found on the Klamp't website (http://klampt.org)
 ## Features
 
 - Unified C++ and Python package for robot modeling, kinematics, dynamics, control, motion planning, simulation, and visualization.
-- Interoperable with [Robot Operating System](http://ros.org) (ROS 1) and [Open Motion Planning Library](https://ompl.kavrakilab.org/) (OMPL).
+- Interoperable with [Robot Operating System](http://ros.org) (ROS 1 / ROS 2 Humble) and [Open Motion Planning Library](https://ompl.kavrakilab.org/) (OMPL).
 - Stable file formats and tooling to save, load, and visualize robots (URDF), meshes, configurations, trajectories, poses, and more. 
-- Built-in conversions to and from Numpy, JSON, ROS 1, Open3D, trimesh, PyTorch, and Sympy objects (in the Python API).
+- Built-in conversions to and from Numpy, JSON, ROS 1, ROS 2, Open3D, trimesh, PyTorch, and Sympy objects (in the Python API).
 - Many geometry types implemented, including meshes, point clouds, signed distance functions, occupancy grids, geometric primitives, convex polytopes, and heightmaps.  Conversions, collision, distance, and ray-casting queries are available between [most pairs of geometry types](Cpp/docs/Manual-Geometry.md).
 - Many sampling-based motion planners implemented (RRT, EST, SBL, RRT*, Lazy-RRG*, Lazy-PRM*, and more).
 - Fast trajectory optimization routines.
@@ -67,6 +67,7 @@ Installation instructions are also available for
 - [Mac OSX](Cpp/docs/Tutorials/Install-Mac.md)
 - [Jupyter notebook](Jupyter/README.md)
 - [Docker](Cpp/docs/Tutorials/Install-Docker.md)
+- [ROS 2 Docker (this repo)](#ros-2-docker)
 
 Klamp't works best when it is installed on your local machine, but it can also be run online through your web browser using Google Colab or Binder (or any other Jupyterhub server).
 
@@ -74,6 +75,30 @@ Klamp't works best when it is installed on your local machine, but it can also b
 - Binder [![Open in Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/krishauser/Klampt-examples/binder?labpath=Jupyter)
 
 Note that the UI functionality is drastically limited compared to a local installation.
+
+### ROS 2 Docker
+
+The repo contains a ready-to-go ROS 2 Humble environment that mounts this directory into the container.
+
+1. Install Docker + Docker Compose and clone this repository locally.
+2. From the repo root build the image (only required once or when the Dockerfile changes):
+   ```
+   docker compose build klampt-ros2
+   ```
+3. Start an interactive shell inside the container with the project mounted at `/workspace`:
+   ```
+   docker compose run --rm klampt-ros2 bash
+   ```
+4. Inside the container build Klamp’t as usual:
+   ```
+   cd /workspace
+   mkdir -p build && cd build
+   cmake .. -DKLAMPT_ROS_VERSION=ROS2
+   make -j$(nproc)
+   ```
+   The provided entrypoint automatically installs the Python package in editable mode; re-run `pip install -e .` if you clean the environment.
+
+> **Optional UI dependencies:** If you plan to build the Qt-based GUI apps inside the container (or on bare metal) install Qt development headers first, e.g. `apt-get install qtbase5-dev`.
 
 ## Documentation
 
@@ -168,5 +193,3 @@ Full version history [is available here](Cpp/docs/Version-History.md)
 Adam Konnecker, Cam Allen, and Steve Kuznetsov have helped with the Mac build.  Hayden Bader helped with the prebuilt Docker container.
 
 As an open-source project, we welcome contributions and suggestions from the community.
-
-

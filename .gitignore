@@ -87,6 +87,14 @@ Cpp/Dependencies/KrisLibrary/
 Cpp/Dependencies/glui*
 Cpp/Dependencies/glew*
 Cpp/Dependencies/ode*
+build/
 
 #visual studio code
 .vscode
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+CPackConfig.cmake
+CPackSourceConfig.cmake

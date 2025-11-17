@@ -19,8 +19,17 @@ from klampt.math import so3,se3
 import math
 import warnings
 try:
-    import rospy
+    import rospy  # ROS 1
+    ROSPY_AVAILABLE = True
+except ImportError:
+    try:
+        from klampt.io import ros2shim as rospy  # ROS 2 shim
+        ROSPY_AVAILABLE = True
+    except ImportError:
+        warnings.warn("Unable to import rospy or ROS 2 (rclpy). Please install ROS 1 or ROS 2 to use the Klampt-ROS IO functions.")
+        ROSPY_AVAILABLE = False
 
+if ROSPY_AVAILABLE:
     from std_msgs.msg import Float32MultiArray
     from geometry_msgs.msg import Vector3,Point,Quaternion,Pose,Transform,PoseStamped,WrenchStamped
     from trajectory_msgs.msg import JointTrajectory
@@ -31,10 +40,6 @@ try:
     from sensor_msgs.msg import Image
     from sensor_msgs.msg import CameraInfo
     from sensor_msgs.msg import LaserScan
-    ROSPY_AVAILABLE = True
-except ImportError:
-    warnings.warn("Unable to import rospy. Please install rospy to use the Klampt-ROS IO functions.")
-    ROSPY_AVAILABLE = False
 
 def from_Vector3(ros_v):
     """From ROS Vector3 to Klamp't point"""
@@ -1161,6 +1166,4 @@ def listen_tf(listener,klampt_obj,frameprefix="klampt",root="world",onerror=None
         return do_lookup(frameprefix,root)
     else:
         raise ValueError("Invalid type given to listen_tf: ",klampt_obj.__class__.__name__)
-
-
 

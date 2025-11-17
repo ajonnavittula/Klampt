@@ -7,7 +7,10 @@ import rosbaxtercontroller
 from klampt.control.io.serialcontroller import ControllerClient
 from klampt import *
 import asyncore
-import rospy
+try:
+    import rospy
+except ImportError:
+    from klampt.io import ros2shim as rospy
 import argparse
 
 def mainKlamptControllerToRosRobot(klampt_robot_model_fn,klampt_serial_port):

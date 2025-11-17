@@ -91,13 +91,68 @@ ELSE(WIN32)
 
 ENDIF(WIN32)
 
-SET(ROSDEPS tf rosconsole roscpp roscpp_serialization rostime )
-FIND_PACKAGE(ROS)
-IF(ROS_FOUND)
-  MESSAGE("ROS found, version " ${ROS_VERSION})
-  LIST(APPEND KLAMPT_INCLUDE_DIRS ${ROS_INCLUDE_DIR})
-  LIST(APPEND KLAMPT_LIBRARIES ${ROS_LIBRARIES})
-  LIST(APPEND KLAMPT_DEFINITIONS "-DHAVE_ROS=1")
-ENDIF(ROS_FOUND)
+set(KLAMPT_ROS_VERSION "AUTO" CACHE STRING "Choose ROS integration (AUTO, ROS1, ROS2, NONE)")
+set_property(CACHE KLAMPT_ROS_VERSION PROPERTY STRINGS AUTO ROS1 ROS2 NONE)
+string(TOUPPER "${KLAMPT_ROS_VERSION}" KLAMPT_ROS_VERSION)
+set(KLAMPT_SELECTED_ROS_VERSION "NONE")
+
+if(KLAMPT_ROS_VERSION STREQUAL "ROS2" OR KLAMPT_ROS_VERSION STREQUAL "AUTO")
+  find_package(rclcpp QUIET)
+  if(rclcpp_FOUND)
+    message("ROS 2 detected via rclcpp")
+    find_package(std_msgs REQUIRED)
+    find_package(geometry_msgs REQUIRED)
+    find_package(sensor_msgs REQUIRED)
+    find_package(trajectory_msgs REQUIRED)
+    find_package(tf2 REQUIRED)
+    find_package(tf2_ros REQUIRED)
+    find_package(tf2_geometry_msgs REQUIRED)
+    list(APPEND KLAMPT_INCLUDE_DIRS
+      ${rclcpp_INCLUDE_DIRS}
+      ${std_msgs_INCLUDE_DIRS}
+      ${geometry_msgs_INCLUDE_DIRS}
+      ${sensor_msgs_INCLUDE_DIRS}
+      ${trajectory_msgs_INCLUDE_DIRS}
+      ${tf2_INCLUDE_DIRS}
+      ${tf2_ros_INCLUDE_DIRS}
+      ${tf2_geometry_msgs_INCLUDE_DIRS})
+    if(TARGET rclcpp::rclcpp)
+      list(APPEND KLAMPT_LIBRARIES rclcpp::rclcpp)
+    else()
+      list(APPEND KLAMPT_LIBRARIES ${rclcpp_LIBRARIES})
+    endif()
+    foreach(_pkg std_msgs geometry_msgs sensor_msgs trajectory_msgs tf2 tf2_ros tf2_geometry_msgs)
+      if(TARGET ${_pkg}::${_pkg})
+        list(APPEND KLAMPT_LIBRARIES ${_pkg}::${_pkg})
+      endif()
+    endforeach()
+    list(APPEND KLAMPT_DEFINITIONS "-DHAVE_ROS2=1")
+    set(KLAMPT_SELECTED_ROS_VERSION "ROS2")
+  elseif(KLAMPT_ROS_VERSION STREQUAL "ROS2")
+    message(WARNING "KLAMPT_ROS_VERSION set to ROS2 but rclcpp was not found")
+  endif()
+endif()
+
+if((KLAMPT_ROS_VERSION STREQUAL "ROS1" OR KLAMPT_ROS_VERSION STREQUAL "AUTO") AND
+   KLAMPT_SELECTED_ROS_VERSION STREQUAL "NONE")
+  SET(ROSDEPS tf rosconsole roscpp roscpp_serialization rostime )
+  FIND_PACKAGE(ROS)
+  IF(ROS_FOUND)
+    MESSAGE("ROS 1 found, version " ${ROS_VERSION})
+    LIST(APPEND KLAMPT_INCLUDE_DIRS ${ROS_INCLUDE_DIR})
+    LIST(APPEND KLAMPT_LIBRARIES ${ROS_LIBRARIES})
+    LIST(APPEND KLAMPT_DEFINITIONS "-DHAVE_ROS1=1")
+    set(KLAMPT_SELECTED_ROS_VERSION "ROS1")
+  ELSE(ROS_FOUND)
+    IF(KLAMPT_ROS_VERSION STREQUAL "ROS1")
+      MESSAGE(WARNING "KLAMPT_ROS_VERSION set to ROS1 but ROS was not found")
+    ENDIF()
+  ENDIF(ROS_FOUND)
+endif()
+
+if(KLAMPT_SELECTED_ROS_VERSION STREQUAL "NONE" AND NOT KLAMPT_ROS_VERSION STREQUAL "NONE")
+  message(STATUS "ROS not found; building without ROS support")
+endif()
 
 LIST(REMOVE_DUPLICATES KLAMPT_INCLUDE_DIRS)
+LIST(REMOVE_DUPLICATES KLAMPT_LIBRARIES)

@@ -6,7 +6,10 @@ It also acts as a ROS clock server.
 """
 
 import controller
-import rospy
+try:
+    import rospy
+except ImportError:
+    from klampt.io import ros2shim as rospy
 from osrf_msgs.msg import JointCommands
 from sensor_msgs.msg import JointState
 from rosgraph_msgs.msg import Clock

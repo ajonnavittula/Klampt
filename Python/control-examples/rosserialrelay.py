@@ -5,7 +5,10 @@ from klampt.control.io import roscontroller
 from klampt.control.io.serialcontroller import ControllerClient
 from klampt import *
 import asyncore
-import rospy
+try:
+    import rospy
+except ImportError:
+    from klampt.io import ros2shim as rospy
 
 def main():
     #read klampt_robot_file and optionally klampt_serial_port from parameter server

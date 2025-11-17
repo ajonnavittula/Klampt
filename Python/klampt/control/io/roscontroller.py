@@ -15,12 +15,17 @@ from .. import blocks
 import warnings
 try:
     import rospy
-    from klampt.model.trajectory import Trajectory,HermiteTrajectory
-    from trajectory_msgs.msg import JointTrajectory,JointTrajectoryPoint
-    from sensor_msgs.msg import JointState
-    from rosgraph_msgs.msg import Clock
 except ImportError:
-    warnings.warn("Unable to import rospy. Please install rospy to use the Klampt-ROS controller block.")
+    try:
+        from klampt.io import ros2shim as rospy
+    except ImportError:
+        rospy = None
+        warnings.warn("Unable to import rospy or ROS 2 (rclpy). Please install ROS to use the Klampt-ROS controller block.")
+
+from klampt.model.trajectory import Trajectory,HermiteTrajectory
+from trajectory_msgs.msg import JointTrajectory,JointTrajectoryPoint
+from sensor_msgs.msg import JointState
+from rosgraph_msgs.msg import Clock
 
 
 #test
@@ -292,6 +297,4 @@ def make(klampt_robot_model):
     joint_trajectory_topic = "/%s/joint_trajectory"%(robotName,)
     joint_states_topic = "/%s/joint_states"%(robotName,)
     return RosRobotBlock(joint_trajectory_topic,joint_states_topic,linkNames)
-
-
 

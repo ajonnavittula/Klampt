@@ -2,7 +2,10 @@
 """
 
 import controller
-import rospy
+try:
+    import rospy
+except ImportError:
+    from klampt.io import ros2shim as rospy
 import math
 import time
 import socket

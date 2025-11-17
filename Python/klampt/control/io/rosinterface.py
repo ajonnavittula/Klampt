@@ -15,12 +15,16 @@ import warnings
 
 try:
     import rospy
-    from klampt.model.trajectory import Trajectory,HermiteTrajectory
-    from trajectory_msgs.msg import JointTrajectory,JointTrajectoryPoint
-    from sensor_msgs.msg import JointState
-
 except ImportError:
-    warnings.warn("Unable to import rospy. Please install rospy to use Klampt's RosRobotInterface.")
+    try:
+        from klampt.io import ros2shim as rospy
+    except ImportError:
+        rospy = None
+        warnings.warn("Unable to import rospy or ROS 2 (rclpy). Please install ROS to use Klampt's RosRobotInterface.")
+
+from klampt.model.trajectory import Trajectory,HermiteTrajectory
+from trajectory_msgs.msg import JointTrajectory,JointTrajectoryPoint
+from sensor_msgs.msg import JointState
 
 class RosRobotInterface(robotinterface.RobotInterfaceBase):
     """Implements a Klampt Robot Interface Layer for a ROS controlled

@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  klampt-ros2:
+    build:
+      context: .
+      dockerfile: Dockerfile.ros2
+    volumes:
+      - .:/workspace:rw
+    environment:
+      - ROS_DOMAIN_ID=0
+    command: bash

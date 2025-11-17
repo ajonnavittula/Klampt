@@ -1,6 +1,7 @@
 #include "ROS.h"
 
-#if HAVE_ROS 
+#if HAVE_ROS1
+ 
 
 #include "Modeling/World.h"
 #include "Modeling/Paths.h"
@@ -1153,9 +1154,1191 @@ bool ROSHadUpdate(const char* topic)
 
 } //namespace Klampt
 
+#elif HAVE_ROS2
+ 
+
+#include "Modeling/World.h"
+#include "Modeling/Paths.h"
+#include "Simulation/Simulator.h"
+#include <KrisLibrary/meshing/PointCloud.h>
+#include "Simulation/SimRobotController.h"
+#include "Sensing/Sensor.h"
+#include "Sensing/VisualSensors.h"
+#include "Sensing/ForceSensors.h"
+#include <KrisLibrary/Timer.h>
+#include <KrisLibrary/Logger.h>
+#include <rclcpp/rclcpp.hpp>
+#include <rclcpp/exceptions.hpp>
+#include <rclcpp/executors/single_threaded_executor.hpp>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/transform_broadcaster.h>
+#include <tf2/exceptions.h>
+#include <tf2/time.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <geometry_msgs/msg/pose.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/transform.hpp>
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <geometry_msgs/msg/wrench_stamped.hpp>
+#include <std_msgs/msg/float32_multi_array.hpp>
+#include <std_msgs/msg/header.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/msg/point_field.hpp>
+#include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/msg/camera_info.hpp>
+#include <trajectory_msgs/msg/joint_trajectory.hpp>
+#include <chrono>
+#include <functional>
+#include <memory>
+#include <thread>
+
+namespace Klampt {
+
+bool IsBigEndian() {
+  int n = 1;
+  // little endian if true
+  if(*(char *)&n == 1) return false;
+  return true;
+}
+
+bool ROSToKlampt(const geometry_msgs::msg::Point& pt,Vector3& kp)
+{
+  kp.x = pt.x;
+  kp.y = pt.y;
+  kp.z = pt.z;
+  return true;
+}
+
+
+bool KlamptToROS(const Vector3& kp,geometry_msgs::msg::Point& p)
+{
+  p.x = kp.x;
+  p.y = kp.y;
+  p.z = kp.z;
+  return true;
+}
+
+bool ROSToKlampt(const geometry_msgs::msg::Quaternion& q,Matrix3& kR)
+{
+  QuaternionRotation kq;
+  kq.x = q.x;
+  kq.y = q.y;
+  kq.z = q.z;
+  kq.w = q.w;
+  kq.getMatrix(kR);
+  return true;
+}
+
+bool KlamptToROS(const Matrix3& kR,geometry_msgs::msg::Quaternion& q)
+{
+  QuaternionRotation kq;
+  if(!kq.setMatrix(kR)) return false;
+  q.x = kq.x;
+  q.y = kq.y;
+  q.z = kq.z;
+  q.w = kq.w;
+  return true;
+}
+
+bool ROSToKlampt(const geometry_msgs::msg::Pose& pose,RigidTransform& kT)
+{
+  ROSToKlampt(pose.position,kT.t);
+  ROSToKlampt(pose.orientation,kT.R);
+  return true;
+}
+
+bool ROSToKlampt(const geometry_msgs::msg::PoseStamped& pose,RigidTransform& kT)
+{
+  ROSToKlampt(pose.pose.position,kT.t);
+  ROSToKlampt(pose.pose.orientation,kT.R);
+  return true;
+}
+
+bool KlamptToROS(const RigidTransform& kT,geometry_msgs::msg::Pose& pose)
+{
+  if(!KlamptToROS(kT.t,pose.position)) return false;
+  if(!KlamptToROS(kT.R,pose.orientation)) return false;
+  return true;
+}
+
+bool KlamptToROS(const RigidTransform& kT,geometry_msgs::msg::PoseStamped& pose)
+{
+  if(!KlamptToROS(kT.t,pose.pose.position)) return false;
+  if(!KlamptToROS(kT.R,pose.pose.orientation)) return false;
+  return true;
+}
+
+bool ROSToKlampt(const sensor_msgs::msg::JointState& js,RobotModel& krobot)
+{
+  map<string,int> indices;
+  for(size_t i=0;i<krobot.linkNames.size();i++)
+    indices[krobot.linkNames[i]] = (int)i;
+  for(size_t i=0;i<js.name.size();i++) {
+    if(indices.count(js.name[i])==0) {
+      fprintf(stderr,"ROS JointState message has incorrect name %s\n",js.name[i].c_str());
+      return false;
+    }
+    if(!js.position.empty()) krobot.q[indices[js.name[i]]] = js.position[i];
+    if(!js.velocity.empty()) krobot.dq[indices[js.name[i]]] = js.velocity[i];
+  }
+  krobot.UpdateFrames();
+  return true;
+}
+
+bool KlamptToROS(const RobotModel& krobot,sensor_msgs::msg::JointState& js)
+{
+  js.name = krobot.linkNames;
+  js.position.resize(krobot.linkNames.size());
+  js.velocity.resize(krobot.linkNames.size());
+  for(size_t i=0;i<krobot.linkNames.size();i++) {
+    js.position[i] = krobot.q[i];
+    js.velocity[i] = krobot.dq[i];
+  }
+  return true;
+}
+
+bool ROSToKlampt(const std_msgs::msg::Float32MultiArray& msg,vector<double>& kvec)
+{
+  kvec.resize(msg.data.size());
+  for(size_t i=0;i<kvec.size();i++)
+    kvec[i] = msg.data[i];
+  return true;
+}
+
+bool KlamptToROS(const vector<double>& kvec,std_msgs::msg::Float32MultiArray& msg)
+{
+  msg.data.resize(kvec.size());
+  for(size_t i=0;i<kvec.size();i++)
+    msg.data[i] = kvec[i];
+  return true;
+}
+
+
+bool CommandedKlamptToROS(SimRobotController& kcontroller,sensor_msgs::msg::JointState& js)
+{
+  Config qcmd,vcmd,t;
+  kcontroller.GetCommandedConfig(qcmd);
+  kcontroller.GetCommandedVelocity(vcmd);
+  kcontroller.GetLinkTorques(t);
+  RobotModel& krobot = *kcontroller.robot;
+  js.name = krobot.linkNames;
+  js.position.resize(krobot.linkNames.size());
+  js.velocity.resize(krobot.linkNames.size());
+  js.effort.resize(krobot.linkNames.size(),0.0);
+  for(size_t i=0;i<krobot.linkNames.size();i++) {
+    js.position[i] = qcmd[i];
+    js.velocity[i] = vcmd[i];
+    js.effort[i] = t[i];
+  }
+  return true;
+}
+
+bool SensedKlamptToROS(SimRobotController& kcontroller,sensor_msgs::msg::JointState& js)
+{
+  Config qcmd,vcmd,t;
+  kcontroller.GetSensedConfig(qcmd);
+  kcontroller.GetSensedVelocity(vcmd);
+  kcontroller.GetLinkTorques(t);
+  RobotModel& krobot = *kcontroller.robot;
+  js.name = krobot.linkNames;
+  js.position.resize(krobot.linkNames.size());
+  js.velocity.resize(krobot.linkNames.size());
+  js.effort.resize(krobot.linkNames.size(),0.0);
+  for(size_t i=0;i<krobot.linkNames.size();i++) {
+    js.position[i] = qcmd[i];
+    js.velocity[i] = vcmd[i];
+    js.effort[i] = t[i];
+  }
+  return true;
+}
+
+bool ROSToKlampt(const trajectory_msgs::msg::JointTrajectory& traj,LinearPath& kpath)
+{
+  kpath.times.resize(traj.points.size());
+  kpath.milestones.resize(traj.points.size());
+  for(size_t i=0;i<traj.points.size();i++) {
+    kpath.times[i] = traj.points[i].time_from_start.toSec();
+    kpath.milestones[i] = traj.points[i].positions;
+  }
+  return true;
+}
+
+bool KlamptToROS(const LinearPath& kpath,trajectory_msgs::msg::JointTrajectory& traj)
+{
+  if(kpath.milestones.empty()) {
+    traj.joint_names.clear();
+    traj.points.clear();
+    return true;
+  }
+  traj.joint_names.resize(kpath.milestones[0].n);
+  for(int i=0;i<kpath.milestones[0].n;i++)
+    traj.joint_names[i] = '0'+i;
+  traj.points.resize(kpath.milestones.size());
+  for(size_t i=0;i<kpath.milestones.size();i++) {
+    traj.points[i].time_from_start = rclcpp::Duration::from_seconds(kpath.times[i]).to_msg();
+    traj.points[i].positions = kpath.milestones[i];
+  }
+  return true;
+}
+
+bool KlamptToROS(const RobotModel& robot,const LinearPath& kpath,trajectory_msgs::msg::JointTrajectory& traj)
+{
+  if(kpath.milestones.empty()) {
+    traj.joint_names.clear();
+    traj.points.clear();
+    return true;
+  }
+  if((int)robot.linkNames.size() != kpath.milestones[0].size()) {
+    fprintf(stderr,"KlamptToROS (LinearPath): path doesn't have same number of milestones as the robot\n");
+    return false;
+  }
+  traj.joint_names = robot.linkNames;
+  traj.points.resize(kpath.milestones.size());
+  for(size_t i=0;i<kpath.milestones.size();i++) {
+    traj.points[i].time_from_start = rclcpp::Duration::from_seconds(kpath.times[i]).to_msg();
+    traj.points[i].positions = kpath.milestones[i];
+  }
+  return true;
+}
+
+bool KlamptToROS(const RobotModel& robot,const vector<int>& indices,const LinearPath& kpath,trajectory_msgs::msg::JointTrajectory& traj)
+{
+  if(kpath.milestones.empty()) {
+    traj.joint_names.clear();
+    traj.points.clear();
+    return true;
+  }
+  if((int)indices.size() != kpath.milestones[0].size()) {
+    fprintf(stderr,"KlamptToROS (LinearPath): path doesn't have same number of milestones as the indices\n");
+    return false;
+  }
+  traj.joint_names.resize(indices.size());
+  for(size_t i=0;i<indices.size();i++) {
+    if(indices[i] < 0 || indices[i] > robot.q.n)  {
+      fprintf(stderr,"KlamptToROS (LinearPath): invalid index\n");
+      return false;
+    }
+    traj.joint_names[i] = robot.linkNames[indices[i]];
+  }
+  traj.points.resize(kpath.milestones.size());
+  for(size_t i=0;i<kpath.milestones.size();i++) {
+    traj.points[i].time_from_start = rclcpp::Duration::from_seconds(kpath.times[i]).to_msg();
+    traj.points[i].positions = kpath.milestones[i];
+  }
+  return true;
+}
+
+// Swap 2 byte, 16 bit values:
+#define Swap2Bytes(val) \
+ ( (((val) >> 8) & 0x00FF) | (((val) << 8) & 0xFF00) )
+// Swap 4 byte, 32 bit values:
+
+#define Swap4Bytes(val) \
+ ( (((val) >> 24) & 0x000000FF) | (((val) >>  8) & 0x0000FF00) | \
+   (((val) <<  8) & 0x00FF0000) | (((val) << 24) & 0xFF000000) )
+
+// Swap 8 byte, 64 bit values:
+#define Swap8Bytes(val) \
+ ( (((val) >> 56) & 0x00000000000000FF) | (((val) >> 40) & 0x000000000000FF00) | \
+   (((val) >> 24) & 0x0000000000FF0000) | (((val) >>  8) & 0x00000000FF000000) | \
+   (((val) <<  8) & 0x000000FF00000000) | (((val) << 24) & 0x0000FF0000000000) | \
+   (((val) << 40) & 0x00FF000000000000) | (((val) << 56) & 0xFF00000000000000) )
+
+#define Swap2If(val,cond) (cond ? Swap2Bytes(val) : val)
+#define Swap4If(val,cond) (cond ? Swap4Bytes(val) : val)
+#define Swap8If(val,cond) (cond ? Swap8Bytes(val) : val)
+
+
+template <class T> 
+void UNPACK(const sensor_msgs::msg::PointField& field,const unsigned char* data,T* out,bool swap_bigendian)
+{
+  static const int datasizes[] = {1,1,2,2,4,4,4,8};
+  int stride = datasizes[field.datatype];
+  data += field.offset;
+  for(size_t i=0;i<field.count;i++) {
+    switch(field.datatype) {
+    case sensor_msgs::msg::PointField::INT8:
+      out[i] = T(*(char*)data);
+      break;
+    case sensor_msgs::msg::PointField::UINT8:
+      out[i] = T(*data);
+      break;
+    case sensor_msgs::msg::PointField::INT16:
+      out[i] = T(Swap2If(*(short*)data,swap_bigendian));
+      break;
+    case sensor_msgs::msg::PointField::UINT16:
+      out[i] = T(Swap2If(*(unsigned short*)data,swap_bigendian));
+      break;
+    case sensor_msgs::msg::PointField::INT32:
+      out[i] = T(Swap4If(*(int*)data,swap_bigendian));
+      break;
+    case sensor_msgs::msg::PointField::UINT32:
+      out[i] = T(Swap4If(*(unsigned int*)data,swap_bigendian));
+      break;
+    case sensor_msgs::msg::PointField::FLOAT32:
+    {
+      int bytes = Swap4If(*(int*)data,swap_bigendian);
+      unsigned char* bptr=((unsigned char*)&bytes);
+      out[i] = T(*(float*)bptr);
+      break;
+    }
+    case sensor_msgs::msg::PointField::FLOAT64:
+    {
+      int64_t bytes = Swap8If(*(int64_t*)data,swap_bigendian);
+      unsigned char* bptr=((unsigned char*)&bytes);
+      out[i] = T(*(double*)bptr);
+      break;
+    }
+    }
+    data += stride;
+  }
+}
+
+bool ROSToKlampt(const sensor_msgs::msg::PointCloud2& pc,Meshing::PointCloud3D& kpc)
+{
+  int xfield=-1,yfield=-1,zfield=-1;
+  int rgbfloat_field=-1;
+  int rgbproperty=-1;
+  vector<int> fieldmap(pc.fields.size(),-1);
+  bool structured = false;
+  if(pc.height > 1) {
+    structured = true;
+    kpc.settings.set("width",pc.width);
+    kpc.settings.set("height",pc.height);
+  }
+  kpc.points.resize(0);
+  kpc.propertyNames.resize(0);
+  kpc.properties.resize(0);
+  bool swap_bigendian = (IsBigEndian() != pc.is_bigendian);
+  for(size_t i=0;i<pc.fields.size();i++) {
+    if(pc.fields[i].name == "x") { xfield=(int)i; Assert(pc.fields[i].count==1); }
+    else if(pc.fields[i].name == "y") { yfield=(int)i; Assert(pc.fields[i].count==1); }
+    else if(pc.fields[i].name == "z") { zfield=(int)i; Assert(pc.fields[i].count==1); }
+    else {
+      fieldmap[i] = (int)kpc.propertyNames.size();
+      if((pc.fields[i].name == "rgb" || pc.fields[i].name == "rgba" ) && pc.fields[i].datatype == sensor_msgs::msg::PointField::FLOAT32) {
+        //custom crap for Kinect2 bridge sending UINTs in float format
+        rgbfloat_field = (int)i;
+        rgbproperty = kpc.propertyNames.size();
+        Assert(pc.fields[i].count == 1);
+        fieldmap[i] = -1;
+      }
+      if(pc.fields[i].count==1) kpc.propertyNames.push_back(pc.fields[i].name);
+      else {
+        for(size_t j=0;j<pc.fields[i].count;j++) {
+          char suffix = '0'+j;
+          kpc.propertyNames.push_back(pc.fields[i].name+suffix);
+        }
+      }
+    }
+  }
+  Assert(pc.data.size() >= pc.row_step*pc.height);
+  int ofs = 0;
+  Vector3 pt(0.0);
+  Vector propertyTemp(kpc.propertyNames.size());
+  for(unsigned int i=0;i<pc.height;i++) {
+    int vofs = ofs;
+    for(unsigned int j=0;j<pc.width;j++) {
+      if(xfield >=0) UNPACK<Real>(pc.fields[xfield],&pc.data[vofs],&pt.x,swap_bigendian);
+      if(yfield >=0) UNPACK<Real>(pc.fields[yfield],&pc.data[vofs],&pt.y,swap_bigendian);
+      if(zfield >=0) UNPACK<Real>(pc.fields[zfield],&pc.data[vofs],&pt.z,swap_bigendian);
+      if(structured || (IsFinite(pt.x) && IsFinite(pt.y) && IsFinite(pt.z))) {
+        kpc.points.push_back(pt);
+        if(rgbfloat_field >= 0) {
+          //hack
+          const unsigned char* data = &pc.data[vofs]+pc.fields[rgbfloat_field].offset;
+          unsigned int rgb = Swap4If(*((unsigned int*)data),swap_bigendian);
+          Real* out = &propertyTemp[rgbproperty];
+          *out = Real(rgb);
+        }
+        int pofs = 0;
+        for(size_t k=0;k<pc.fields.size();k++) {
+          if(fieldmap[k] < 0) continue;
+          UNPACK<Real>(pc.fields[k],&pc.data[vofs],&propertyTemp[pofs],swap_bigendian);
+          pofs +=pc.fields[k].count;
+        }
+        kpc.properties.push_back(propertyTemp);
+      }
+      vofs += pc.point_step;
+    }
+    ofs += pc.row_step;
+  }
+  //printf("Read %d points from ROS\n",kpc.points.size());
+  return true;
+}
+
+bool KlamptToROS(const Meshing::PointCloud3D& kpc,sensor_msgs::msg::PointCloud2& pc)
+{
+  pc.is_bigendian = IsBigEndian();
+  if(kpc.IsStructured()) {
+    pc.height = kpc.GetStructuredHeight();
+    pc.width = kpc.GetStructuredWidth();
+  }
+  else {
+    pc.height = 1;
+    pc.width = kpc.points.size();
+  }
+  pc.point_step = 4*(3+kpc.propertyNames.size());
+  pc.row_step = pc.width*pc.point_step;
+  pc.fields.resize(3+kpc.propertyNames.size());
+  pc.fields[0].name = "x";
+  pc.fields[1].name = "y";
+  pc.fields[2].name = "z";
+  for(size_t i=0;i<kpc.propertyNames.size();i++)
+    pc.fields[3+i].name = kpc.propertyNames[i];
+  for(size_t i=0;i<pc.fields.size();i++) {
+    pc.fields[i].datatype = sensor_msgs::msg::PointField::FLOAT32;
+    pc.fields[i].offset = i*4;
+    pc.fields[i].count = 1;
+  }
+  int ofs = 0;
+  pc.data.resize(pc.row_step);
+  for(size_t i=0;i<kpc.points.size();i++) {
+    *(float*)&pc.data[ofs] = kpc.points[i].x; ofs += 4;
+    *(float*)&pc.data[ofs] = kpc.points[i].y; ofs += 4;
+    *(float*)&pc.data[ofs] = kpc.points[i].z; ofs += 4;
+    for(size_t j=0;j<kpc.propertyNames.size();j++) {
+      *(float*)&pc.data[ofs] = kpc.properties[i][j]; ofs += 4;
+    }
+  }
+  return true;
+}
+
+bool ROSToKlampt(const geometry_msgs::msg::Transform& T,RigidTransform& kT)
+{
+  kT.t.set(T.translation.x,T.translation.y,T.translation.z);
+  QuaternionRotation q;
+  q.x = T.rotation.x;
+  q.y = T.rotation.y;
+  q.z = T.rotation.z;
+  q.w = T.rotation.w;
+  q.getMatrix(kT.R);
+  return true;
+}
+
+bool ROSToKlampt(const geometry_msgs::msg::TransformStamped& T,RigidTransform& kT)
+{
+  return ROSToKlampt(T.transform,kT);
+}
+
+bool KlamptToROS(const RigidTransform& kT,geometry_msgs::msg::Transform& T)
+{
+  KlamptToROS(kT.t,T.translation);
+  KlamptToROS(kT.R,T.rotation);
+  return true;
+}
+
+
+
+static std::shared_ptr<rclcpp::Node> gRosNode;
+static std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> gRosExecutor;
+int gRosQueueSize = 1;
+bool gRosSubscribeError = false;
+string gRosSubscribeErrorWhere;
+
+class ROSSubscriberBase
+{
+public:
+  ROSSubscriberBase() : error(false),numMessages(0) {}
+  virtual ~ROSSubscriberBase() { unsubscribe(); }
+  void unsubscribe() {
+    topic.clear();
+    numMessages = 0;
+    sub.reset();
+  }
+  virtual void endUpdate() {}
+
+  rclcpp::SubscriptionBase::SharedPtr sub;
+  string topic;
+  bool error;
+  std_msgs::msg::Header header;
+  int numMessages;
+};
+
+class ROSPublisherBase
+{
+public:
+  virtual ~ROSPublisherBase() {}
+  virtual size_t SubscriptionCount() const = 0;
+  string topic;
+};
+
+typedef map<string,shared_ptr<ROSSubscriberBase> > SubscriberList;
+typedef map<string,shared_ptr<ROSPublisherBase> > PublisherList;
+SubscriberList gSubscribers;
+PublisherList gPublishers;
+
+
+
+
+template <class Type,class Msg>
+class ROSSubscriber : public ROSSubscriberBase
+{
+public:
+  Type& obj;
+  typename rclcpp::Subscription<Msg>::SharedPtr typedSub;
+  ROSSubscriber(Type& _obj,const std::string& _topic):obj(_obj) {
+    this->topic = _topic;
+    auto qos = rclcpp::QoS(rclcpp::KeepLast(gRosQueueSize));
+    typedSub = gRosNode->create_subscription<Msg>(_topic,qos,
+      std::bind(&ROSSubscriber<Type,Msg>::callback,this,std::placeholders::_1));
+    sub = typedSub;
+  }
+  void callback(const typename Msg::SharedPtr msg) {
+    numMessages++;
+    header = msg->header;
+    error = (!ROSToKlampt(*msg,obj));
+    if(error) {
+      gRosSubscribeError = true;
+      gRosSubscribeErrorWhere = this->topic;
+    }
+  }
+  virtual void endUpdate() {}
+};
+
+
+class ROSTfSubscriber : public ROSSubscriberBase
+{
+public:
+  tf2_ros::Buffer buffer;
+  tf2_ros::TransformListener listener;
+  map<string,RigidTransform*> transforms;
+  ROSTfSubscriber()
+    :buffer(gRosNode->get_clock()),listener(buffer,gRosNode,false)
+  { this->topic = "tf"; }
+  void update() {
+    try{
+      for(map<string,RigidTransform*>::iterator i=transforms.begin();i!=transforms.end();i++) {
+        geometry_msgs::msg::TransformStamped transform =
+          buffer.lookupTransform(i->first,"world",tf2::TimePointZero);
+        ROSToKlampt(transform,*i->second);
+      }
+    }
+    catch (tf2::TransformException&) {
+      gRosSubscribeError = true;
+      gRosSubscribeErrorWhere = "tf";
+    }
+  }
+};
+
+
+template <class Msg>
+class ROSPublisher : public ROSPublisherBase
+{
+public:
+  Msg msg;
+  typename rclcpp::Publisher<Msg>::SharedPtr pub;
+  ROSPublisher(const std::string& topic) {
+    this->topic = topic;
+    auto qos = rclcpp::QoS(rclcpp::KeepLast(gRosQueueSize));
+    pub = gRosNode->create_publisher<Msg>(topic,qos);
+    msg.header.frame_id = "0";
+  }
+  template <class Type>
+  void publish(const Type& obj) {
+    if(pub->get_subscription_count() == 0) return;
+    msg.header.stamp = gRosNode->get_clock()->now();
+    KlamptToROS(obj,msg);
+    pub->publish(msg);
+  }
+  ///assumes that you've updated the meaningful parts of msg
+  void publish_current() {
+    if(pub->get_subscription_count() == 0) return;
+    msg.header.stamp = gRosNode->get_clock()->now();
+    pub->publish(msg);
+  }
+  size_t SubscriptionCount() const override {
+    return pub ? pub->get_subscription_count() : 0;
+  }
+};
+
+template <class Msg>
+class ROSRawPublisher : public ROSPublisherBase
+{
+public:
+  Msg msg;
+  typename rclcpp::Publisher<Msg>::SharedPtr pub;
+  ROSRawPublisher(const std::string& topic) {
+    this->topic = topic;
+    auto qos = rclcpp::QoS(rclcpp::KeepLast(gRosQueueSize));
+    pub = gRosNode->create_publisher<Msg>(topic,qos);
+  }
+  template <class Type>
+  void publish(const Type& obj) {
+    if(pub->get_subscription_count() == 0) return;
+    KlamptToROS(obj,msg);
+    pub->publish(msg);
+  }
+  ///assumes that you've updated the meaningful parts of msg
+  void publish_current() {
+    if(pub->get_subscription_count() == 0) return;
+    pub->publish(msg);
+  }
+  size_t SubscriptionCount() const override {
+    return pub ? pub->get_subscription_count() : 0;
+  }
+};
+
+
+class ROSTfPublisher : public ROSPublisherBase
+{
+public:
+  tf2_ros::TransformBroadcaster broadcaster;
+  ROSTfPublisher():broadcaster(gRosNode) { this->topic = "tf"; }
+  void send(const string& name,const RigidTransform& T,const char* parent="world") {
+    geometry_msgs::msg::TransformStamped msg;
+    bool valid = KlamptToROS(T,msg.transform);
+    if(!valid) {
+      printf("RosPublishTransforms: transform of %s is not valid?\n",name.c_str());
+      return;
+    }
+    msg.header.stamp = gRosNode->get_clock()->now();
+    msg.header.frame_id = parent;
+    msg.child_frame_id = name;
+    broadcaster.sendTransform(msg);
+  }
+  size_t SubscriptionCount() const override { return 0; }
+};
+
+
+bool ROSInit(const char* nodeName)
+{
+  if(gRosNode) return true;
+  if(!rclcpp::ok()) {
+    int argc = 0;
+    char** argv = nullptr;
+    rclcpp::init(argc,argv);
+  }
+  try {
+    gRosNode = std::make_shared<rclcpp::Node>(nodeName);
+  }
+  catch(const rclcpp::exceptions::InvalidNodeNameError&) {
+    gRosNode = std::make_shared<rclcpp::Node>("klampt");
+  }
+  gRosExecutor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+  gRosExecutor->add_node(gRosNode);
+  return true;
+}
+
+bool ROSInitialized()
+{
+  return (bool)gRosNode;
+}
+
+bool ROSShutdown()
+{
+  if(gRosExecutor && gRosNode) {
+    gRosExecutor->remove_node(gRosNode);
+    gRosExecutor.reset();
+  }
+  if(gRosNode) {
+    gRosNode.reset();
+  }
+  if(rclcpp::ok()) {
+    rclcpp::shutdown();
+  }
+  return true;
+}
+
+bool ROSSetQueueSize(int size)
+{
+  if(size <= 0) return false;
+  gRosQueueSize = size;
+  return true;
+}
+
+template<class Type,class Msg>
+bool RosSubscribe(Type& obj,const string& topic)
+{
+  if(!ROSInit()) return false;
+  SubscriberList::iterator i=gSubscribers.find(topic); 
+  if(i!=gSubscribers.end()) { 
+    printf("ROSSubscribe: Unsubscribing old subscriber to topic %s\n",topic.c_str());
+    i->second->unsubscribe();
+    i->second = NULL;
+  }
+  auto sub = make_shared<ROSSubscriber<Type,Msg> >(obj,topic); 
+  if(!sub->sub) {
+    fprintf(stderr,"ROSSubscribe: Unable to subscribe to topic %s, maybe wrong type\n",topic.c_str());
+    return false;
+  }
+  gSubscribers[topic] = sub;
+  return true; 
+}
+
+template<class Type,class PubType,class Msg>
+bool RosPublish2(const Type& obj,const string& topic)
+{
+  if(!ROSInit()) return false;
+  PublisherList::iterator i=gPublishers.find(topic); 
+  PubType* pub;
+  if(i==gPublishers.end()) { 
+    pub = new PubType(topic); 
+    gPublishers[topic].reset(pub); 
+  } 
+  else { 
+    pub = dynamic_cast<PubType*>(i->second.get());
+    if(!pub) return false;
+  }
+  pub->publish(obj); 
+  return true; 
+}
+
+
+
+template <class Msg>
+ROSPublisher<Msg>* GetPublisher(const char* topic)
+{
+  if(!ROSInit()) return NULL;
+  PublisherList::iterator i=gPublishers.find(topic); 
+  ROSPublisher<Msg>* pub;
+  if(i==gPublishers.end()) { 
+    pub = new ROSPublisher<Msg>(topic); 
+    gPublishers[topic].reset(pub); 
+  } 
+  else { 
+    pub = dynamic_cast<ROSPublisher<Msg>*>(i->second.get());
+    if(!pub) return NULL;
+  }
+  return pub;
+}
+
+template<class Type,class Msg>
+bool RosPublish(const Type& obj,const string& topic)
+{
+  return RosPublish2<Type,ROSPublisher<Msg>,Msg>(obj,topic);
+}
+
+bool ROSPublishTransforms(const WorldModel& world,const char* frameprefix)
+{
+  if(!ROSInit()) return false;
+  string prefix = frameprefix;
+  ROSTfPublisher* tf;
+  if(gPublishers.count("tf")==0) {
+    tf = new ROSTfPublisher();
+    gPublishers["tf"].reset(tf);
+  }
+  else {
+    tf = dynamic_cast<ROSTfPublisher*>(gPublishers["tf"].get());
+    if(tf==NULL) return false;
+  }
+  for(size_t i=0;i<world.rigidObjects.size();i++)
+    tf->send(prefix+"/"+world.rigidObjects[i]->name,world.rigidObjects[i]->T);
+  for(size_t i=0;i<world.robots.size();i++) {
+    string rprefix = prefix+"/"+world.robots[i]->name;
+    for(size_t j=0;j<world.robots[i]->links.size();j++) {
+      int p = world.robots[i]->parents[j];
+      if(p < 0) {
+        tf->send(rprefix+"/"+world.robots[i]->linkNames[j],world.robots[i]->links[j].T_World);
+      }
+      else {
+        RigidTransform Tparent;
+        Tparent.mulInverseA(world.robots[i]->links[p].T_World,world.robots[i]->links[j].T_World);
+        tf->send(rprefix+"/"+world.robots[i]->linkNames[j],Tparent,(rprefix+"/"+world.robots[i]->linkNames[j]).c_str());
+      }
+    }
+  }
+  return true;
+}
+
+bool ROSPublishTransforms(const Simulator& sim,const char* frameprefix)
+{
+  if(!ROSInit()) return false;
+  string prefix = frameprefix;
+  ROSTfPublisher* tf;
+  if(gPublishers.count("tf")==0) {
+    tf = new ROSTfPublisher();
+    gPublishers["tf"].reset(tf);
+  }
+  else {
+    tf = dynamic_cast<ROSTfPublisher*>(gPublishers["tf"].get());
+    if(tf==NULL) return false;
+  }
+  RigidTransform T,Tp;
+  for(size_t i=0;i<sim.world->rigidObjects.size();i++) {
+    sim.odesim.object(i)->GetTransform(T);
+    tf->send(prefix+"/"+sim.world->rigidObjects[i]->name,T);
+  }
+  for(size_t i=0;i<sim.world->robots.size();i++) {
+    string rprefix = prefix+"/"+sim.world->robots[i]->name;
+    for(size_t j=0;j<sim.world->robots[i]->links.size();j++) {
+      sim.odesim.robot(i)->GetLinkTransform(j,T);
+      int p = sim.world->robots[i]->parents[j];
+      if(p < 0)
+        tf->send(rprefix+"/"+sim.world->robots[i]->linkNames[j],T);
+      else {
+        sim.odesim.robot(i)->GetLinkTransform(p,Tp);
+        RigidTransform Trel;
+        Trel.mulInverseA(Tp,T);
+        tf->send(rprefix+"/"+sim.world->robots[i]->linkNames[j],Trel,(rprefix+"/"+sim.world->robots[i]->linkNames[p]).c_str());
+      }
+    }
+  }
+  return true;
+}
+
+bool ROSPublishTransforms(const RobotModel& robot,const char* frameprefix)
+{
+  if(!ROSInit()) return false;
+  string prefix = frameprefix;
+  ROSTfPublisher* tf;
+  if(gPublishers.count("tf")==0) {
+    tf = new ROSTfPublisher();
+    gPublishers["tf"].reset(tf);
+  }
+  else {
+    tf = dynamic_cast<ROSTfPublisher*>(gPublishers["tf"].get());
+    if(tf==NULL) return false;
+  }
+  for(size_t j=0;j<robot.links.size();j++)  {
+    int p = robot.parents[j];
+    if(p < 0) {
+      tf->send(prefix+"/"+robot.linkNames[j],robot.links[j].T_World);
+    }
+    else {
+      RigidTransform Tparent;
+      Tparent.mulInverseA(robot.links[p].T_World,robot.links[j].T_World);
+      tf->send(prefix+"/"+robot.linkNames[j],Tparent,(prefix+"/"+robot.linkNames[j]).c_str());
+    }
+  }
+  return true;
+}
+
+bool ROSPublishTransform(const RigidTransform& T,const char* frame)
+{
+  ROSTfPublisher* tf;
+  if(gPublishers.count("tf")==0) {
+    tf = new ROSTfPublisher();
+    gPublishers["tf"].reset(tf);
+  }
+  else {
+    tf = dynamic_cast<ROSTfPublisher*>(gPublishers["tf"].get());
+    if(tf==NULL) return false;
+  }
+  tf->send(frame,T);
+  return true;
+}
+
+bool ROSPublishPose(const RigidTransform& T,const char* topic)
+{
+  return RosPublish<RigidTransform,geometry_msgs::msg::PoseStamped>(T,topic);
+}
+
+bool ROSPublishJointState(const RobotModel& robot,const char* topic)
+{
+  return RosPublish<RobotModel,sensor_msgs::msg::JointState>(robot,topic);
+}
+
+bool ROSPublishPointCloud(const Meshing::PointCloud3D& pc,const char* topic)
+{
+  return RosPublish<Meshing::PointCloud3D,sensor_msgs::msg::PointCloud2>(pc,topic);
+}
+
+bool ROSPublishTrajectory(const LinearPath& path,const char* topic) 
+{
+  return RosPublish<LinearPath,trajectory_msgs::msg::JointTrajectory>(path,topic);
+}
+
+bool ROSPublishTrajectory(const RobotModel& robot,const LinearPath& path,const char* topic)
+{
+  if(!ROSInit()) return false;
+  ROSPublisher<trajectory_msgs::msg::JointTrajectory>* pub = GetPublisher<trajectory_msgs::msg::JointTrajectory>(topic);
+  if(!pub) {
+    LOG4CXX_ERROR(KrisLibrary::logger(),"Error getting JointTrajectory publisher on "<<topic);
+    return false;
+  }
+  //ignore if no subscribers
+  if(pub->pub->get_subscription_count() == 0) return true;
+  //do conversion if there's a subscriber
+  KlamptToROS(robot,path,pub->msg);
+  pub->publish_current();
+  return true; 
+}
+
+bool ROSPublishTrajectory(const RobotModel& robot,const vector<int>& indices,const LinearPath& path,const char* topic)
+{
+  if(!ROSInit()) return false;
+  ROSPublisher<trajectory_msgs::msg::JointTrajectory>* pub = GetPublisher<trajectory_msgs::msg::JointTrajectory>(topic);
+  if(!pub) {
+    LOG4CXX_ERROR(KrisLibrary::logger(),"Error getting JointTrajectory publisher on "<<topic);
+    return false;
+  }
+  //ignore if no subscribers
+  if(pub->pub->get_subscription_count() == 0) return true;
+  //do conversion if there's a subscriber
+  KlamptToROS(robot,indices,path,pub->msg);
+  pub->publish_current();
+  return true; 
+}
+
+void KlamptToROSCameraInfo(const CameraSensor& cam,sensor_msgs::msg::CameraInfo& msg)
+{
+  msg.width = cam.xres;
+  msg.height = cam.yres;
+  msg.distortion_model = "plumb_bob";
+  msg.D.resize(5,0.0);
+  Real fx = 0.5*cam.xres/Tan(cam.xfov*0.5);
+  Real fy = 0.5*cam.yres/Tan(cam.yfov*0.5);
+  Real cx = 0.5*cam.xres;
+  Real cy = 0.5*cam.yres;
+  msg.K[0] = fx;
+  msg.K[4] = fy;
+  msg.K[8] = 1;
+  msg.K[3] = cx;
+  msg.K[7] = cy;
+  msg.R[0] = 1;
+  msg.R[4] = 1;
+  msg.R[8] = 1;
+  msg.P[0] = fx;
+  msg.P[5] = fy;
+  msg.P[10] = 1;
+  msg.P[3] = cx;
+  msg.P[8] = cy;
+}
+
+
+bool ROSPublishSensorMeasurement(const SensorBase* sensor,const char* topic)
+{
+  RobotModel blank;
+  return ROSPublishSensorMeasurement(sensor,blank,topic,NULL);
+}
+bool ROSPublishSensorMeasurement(const SensorBase* sensor,const RobotModel& robot,const char* topic,const char* frameprefix)
+{
+  if(!ROSInit()) return false;
+  if(0 == strcmp(sensor->Type(),"CameraSensor")) {
+    const CameraSensor* camera = dynamic_cast<const CameraSensor*>(sensor);
+    string frame = "0";
+    if(frameprefix) 
+      frame = string(frameprefix) + "/" + robot.name + "/" + robot.linkNames[camera->link];
+    
+    vector<double> measurements;
+    camera->GetMeasurements(measurements);
+    if(measurements.empty()) return false;
+    if(camera->rgb) {
+      ROSPublisher<sensor_msgs::msg::CameraInfo>* pubinfo = GetPublisher<sensor_msgs::msg::CameraInfo>((string(topic)+"/rgb/camera_info").c_str());
+      if(!pubinfo) {
+        LOG4CXX_ERROR(KrisLibrary::logger(),"Error getting CameraInfo publisher on "<<topic<<"/rgb/camera_info");
+        return false;
+      }
+      KlamptToROSCameraInfo(*camera,pubinfo->msg);
+      pubinfo->msg.header.frame_id = frame;
+      pubinfo->publish_current();
+      ROSPublisher<sensor_msgs::msg::Image>* pub = GetPublisher<sensor_msgs::msg::Image>((string(topic)+"/rgb/image_rect_color").c_str());
+      if(!pub) {
+        LOG4CXX_ERROR(KrisLibrary::logger(),"Error getting Image publisher on "<<topic<<"/rgb/image_rect_color");
+        return false;
+      }
+      pub->msg.header.frame_id = frame;
+      pub->msg.width = camera->xres;
+      pub->msg.height = camera->yres;
+      pub->msg.encoding = "rgb8";
+      pub->msg.is_bigendian = IsBigEndian();
+      pub->msg.step = pub->msg.width*3;
+      pub->msg.data.resize(camera->xres*camera->yres*3);
+      for(int i=0;i<camera->xres*camera->yres;i++) {
+        unsigned int abgr = (unsigned int)measurements[i];
+        unsigned char b = (abgr >> 16) & 0xff;
+        unsigned char g = (abgr >> 8) & 0xff;
+        unsigned char r = (abgr) & 0xff;
+        pub->msg.data[i*3]=r;
+        pub->msg.data[i*3+1]=g;
+        pub->msg.data[i*3+2]=b;
+      }
+      pub->publish_current();
+    }
+    if(camera->depth) {
+      ROSPublisher<sensor_msgs::msg::CameraInfo>* pubinfo = GetPublisher<sensor_msgs::msg::CameraInfo>((string(topic)+"/depth_registered/camera_info").c_str());
+      if(!pubinfo) {
+        LOG4CXX_ERROR(KrisLibrary::logger(),"Error getting CameraInfo publisher on "<<topic<<"/depth_registered/camera_info");
+        return false;
+      }
+      KlamptToROSCameraInfo(*camera,pubinfo->msg);
+      pubinfo->publish_current();
+      int ofs = 0;
+      if(camera->rgb) ofs = camera->xres*camera->yres;
+      ROSPublisher<sensor_msgs::msg::Image>* pub = GetPublisher<sensor_msgs::msg::Image>((string(topic)+"/depth_registered/image_rect").c_str());
+      if(!pub) {
+        LOG4CXX_ERROR(KrisLibrary::logger(),"Error getting Image publisher on "<<topic<<"/depth_registered/image_rect");
+        return false;
+      }
+      pub->msg.width = camera->xres;
+      pub->msg.height = camera->yres;
+      pub->msg.encoding = "32FC1";
+      pub->msg.is_bigendian = IsBigEndian();
+      pub->msg.step = pub->msg.width*4;
+      pub->msg.data.resize(camera->xres*camera->yres*4);
+      for(int i=0;i<camera->xres*camera->yres;i++) {
+        double d = measurements[ofs+i];
+        *((float*)&pub->msg.data[i*4])=float(d);
+      }
+      pub->publish_current();
+    }
+  }
+  else if(0 == strcmp(sensor->Type(),"ForceTorqueSensor")) {
+    const ForceTorqueSensor* ft = dynamic_cast<const ForceTorqueSensor*>(sensor);
+    string frame = "0";
+    if(frameprefix) 
+      frame = string(frameprefix) + "/" + robot.name + "/" + robot.linkNames[ft->link];
+
+    vector<double> measurements;
+    sensor->GetMeasurements(measurements);
+    if(measurements.size() != 6) return false;
+    ROSPublisher<geometry_msgs::msg::WrenchStamped>* pub = GetPublisher<geometry_msgs::msg::WrenchStamped>(topic);
+    pub->msg.header.frame_id = frame;
+    pub->msg.wrench.force.x = measurements[0];
+    pub->msg.wrench.force.y = measurements[1];
+    pub->msg.wrench.force.z = measurements[2];
+    pub->msg.wrench.torque.x = measurements[3];
+    pub->msg.wrench.torque.y = measurements[4];
+    pub->msg.wrench.torque.z = measurements[5];
+    pub->publish_current();
+  }
+  else {
+    vector<double> measurements;
+    sensor->GetMeasurements(measurements);
+    RosPublish2<vector<double>,ROSRawPublisher<std_msgs::msg::Float32MultiArray>,std_msgs::msg::Float32MultiArray>(measurements,topic);
+  }
+  return true;
+}
+
+bool ROSPublishCommandedJointState(SimRobotController& robot,const char* topic)
+{
+  ROSPublisher<sensor_msgs::msg::JointState>* pub = GetPublisher<sensor_msgs::msg::JointState>(topic);
+  if(!pub) return false;
+  CommandedKlamptToROS(robot,pub->msg);
+  pub->publish_current();
+  return true;
+}
+
+bool ROSPublishSensedJointState(SimRobotController& robot,const char* topic)
+{
+  ROSPublisher<sensor_msgs::msg::JointState>* pub = GetPublisher<sensor_msgs::msg::JointState>(topic);
+  if(!pub) return false;
+  SensedKlamptToROS(robot,pub->msg);
+  pub->publish_current();
+  return true;
+}
+
+
+bool ROSSubscribeTransforms(WorldModel& world,const char* frameprefix);
+bool ROSSubscribeTransforms(RobotModel& robot,const char* frameprefix);
+bool ROSSubscribeTransform(RigidTransform& T,const char* frameprefix);
+bool ROSSubscribePose(RigidTransform& T,const char* topic)
+{
+  //TODO: handle un-stamped messages?
+  return RosSubscribe<RigidTransform,geometry_msgs::msg::PoseStamped>(T,topic);
+}
+bool ROSSubscribeJointState(RobotModel& robot,const char* topic)
+{
+  return RosSubscribe<RobotModel,sensor_msgs::msg::JointState>(robot,topic);
+}
+bool ROSSubscribePointCloud(Meshing::PointCloud3D& pc,const char* topic)
+{
+  //printf("ROSSubscribePointCloud %s\n",topic);
+  return RosSubscribe<Meshing::PointCloud3D,sensor_msgs::msg::PointCloud2>(pc,topic);
+}
+
+bool ROSSubscribeTrajectory(LinearPath& path,const char* topic) 
+{
+  return RosSubscribe<LinearPath,trajectory_msgs::msg::JointTrajectory>(path,topic);
+}
+
+bool ROSSubscribeUpdate()
+{
+  if(gSubscribers.empty() && gPublishers.empty()) return false; 
+  //Timer timer;
+  for(SubscriberList::iterator i=gSubscribers.begin();i!=gSubscribers.end();i++)
+    i->second->numMessages = 0;
+  gRosSubscribeError = false;
+  if(gRosExecutor) gRosExecutor->spin_some();
+  //TODO: tf listener is running in background, do we want a delay?
+  if(gSubscribers.count("tf") != 0) {
+    ROSTfSubscriber* tf=dynamic_cast<ROSTfSubscriber*>(gSubscribers["tf"].get());
+    if(tf != NULL) tf->update();
+  }
+  bool updated = false;
+  for(SubscriberList::iterator i=gSubscribers.begin();i!=gSubscribers.end();i++)
+    if(i->second->numMessages > 0) {
+      //printf("%d updates to %s\n",i->second->numMessages,i->second->topic.c_str());
+      updated = true;
+      i->second->endUpdate();
+    }
+  //printf("ROS Update in time %gs\n",timer.ElapsedTime());
+  if(gRosSubscribeError) {
+    fprintf(stderr,"ROS: Error converting topic %s to Klampt format\n",gRosSubscribeErrorWhere.c_str());
+    return false;
+  }
+  return updated;
+}
+
+bool ROSDetach(const char* topic)
+{
+  if(gSubscribers.count(topic) != 0) {
+    gSubscribers[topic] = NULL;
+    gSubscribers.erase(gSubscribers.find(topic));
+    return true;
+  }
+  fprintf(stderr,"ROSDetach: topic %s not published/subscribed\n",topic);
+  return false;
+}
+
+int ROSNumSubscribedTopics() { return (int)gSubscribers.size(); }
+int ROSNumPublishedTopics() { return (int)gPublishers.size(); }
+
+bool ROSIsConnected(const char* topic) {
+  if(gSubscribers.count(topic) != 0) {
+    return gSubscribers[topic]->sub && gSubscribers[topic]->sub->get_publisher_count() >  0;
+  }
+  else if(gPublishers.count(topic) != 0) {
+    return gPublishers[topic]->SubscriptionCount() >  0;
+  }
+  return false;
+}
+
+std::string ROSFrame(const char* topic)
+{
+  if(gSubscribers.count(topic) != 0) {
+    return gSubscribers[topic]->header.frame_id;
+  }
+  return "";
+}
+
+bool ROSWaitForUpdate(const char* topic,double timeout)
+{
+  if(gSubscribers.count(topic) == 0) return false;
+  auto s = gSubscribers[topic];
+  int oldNumMessages = s->numMessages;
+  Timer timer;
+  while(timer.ElapsedTime() < timeout) {
+    if(gRosExecutor) gRosExecutor->spin_some();
+    double remaining = Max(Min(timeout-timer.ElapsedTime(),0.001),0.0);
+    if(remaining > 0)
+      std::this_thread::sleep_for(std::chrono::duration<double>(remaining));
+    if(s->numMessages > oldNumMessages) return true;
+  }
+  return false;
+}
+
+bool ROSHadUpdate(const char* topic)
+{
+  if(gSubscribers.count(topic) == 0) {
+    printf("No subscribers on topic %s\n",topic);
+    printf("Valid topics:\n");
+    for(auto i = gSubscribers.begin();i!=gSubscribers.end();i++)
+      printf("  %s\n",i->first.c_str());
+    return false;
+  }
+  auto s = gSubscribers[topic];
+  return s->numMessages > 0;
+}
+
+
+} //namespace Klampt
 
 #else
-
 #include "Modeling/World.h"
 
 namespace Klampt {
@@ -1197,4 +2380,4 @@ bool ROSHadUpdate(const char* topic) { return false; }
 
 } //namespace Klampt
 
-#endif //HAVE_ROS
+#endif //HAVE_ROS1/HAVE_ROS2
