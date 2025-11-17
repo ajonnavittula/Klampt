@@ -192,7 +192,8 @@ bool ROSToKlampt(const trajectory_msgs::JointTrajectory& traj,LinearPath& kpath)
   kpath.times.resize(traj.points.size());
   kpath.milestones.resize(traj.points.size());
   for(size_t i=0;i<traj.points.size();i++) {
-    kpath.times[i] = traj.points[i].time_from_start.toSec();
+    kpath.times[i] = traj.points[i].time_from_start.sec +
+      traj.points[i].time_from_start.nanosec*1e-9;
     kpath.milestones[i] = traj.points[i].positions;
   }
   return true;
@@ -343,7 +344,7 @@ bool ROSToKlampt(const sensor_msgs::PointCloud2& pc,Meshing::PointCloud3D& kpc)
   }
   kpc.points.resize(0);
   kpc.propertyNames.resize(0);
-  kpc.properties.resize(0);
+  kpc.properties.resize(0,0);
   bool swap_bigendian = (IsBigEndian() != pc.is_bigendian);
   for(size_t i=0;i<pc.fields.size();i++) {
     if(pc.fields[i].name == "x") { xfield=(int)i; Assert(pc.fields[i].count==1); }
@@ -370,7 +371,8 @@ bool ROSToKlampt(const sensor_msgs::PointCloud2& pc,Meshing::PointCloud3D& kpc)
   Assert(pc.data.size() >= pc.row_step*pc.height);
   int ofs = 0;
   Vector3 pt(0.0);
-  Vector propertyTemp(kpc.propertyNames.size());
+  Vector propertyTemp;
+  vector<Vector> propertyRows;
   for(unsigned int i=0;i<pc.height;i++) {
     int vofs = ofs;
     for(unsigned int j=0;j<pc.width;j++) {
@@ -386,17 +388,24 @@ bool ROSToKlampt(const sensor_msgs::PointCloud2& pc,Meshing::PointCloud3D& kpc)
           Real* out = &propertyTemp[rgbproperty];
           *out = Real(rgb);
         }
+        propertyTemp.resize(kpc.propertyNames.size());
         int pofs = 0;
         for(size_t k=0;k<pc.fields.size();k++) {
           if(fieldmap[k] < 0) continue;
           UNPACK<Real>(pc.fields[k],&pc.data[vofs],&propertyTemp[pofs],swap_bigendian);
           pofs +=pc.fields[k].count;
         }
-        kpc.properties.push_back(propertyTemp);
+        propertyRows.push_back(propertyTemp);
       }
       vofs += pc.point_step;
     }
     ofs += pc.row_step;
+  }
+  kpc.properties.resize(propertyRows.size(),kpc.propertyNames.size());
+  for(size_t i=0;i<propertyRows.size();i++) {
+    for(int j=0;j<propertyRows[i].n;j++) {
+      kpc.properties(i,j) = propertyRows[i][j];
+    }
   }
   //printf("Read %d points from ROS\n",kpc.points.size());
   return true;
@@ -433,7 +442,7 @@ bool KlamptToROS(const Meshing::PointCloud3D& kpc,sensor_msgs::PointCloud2& pc)
     *(float*)&pc.data[ofs] = kpc.points[i].y; ofs += 4;
     *(float*)&pc.data[ofs] = kpc.points[i].z; ofs += 4;
     for(size_t j=0;j<kpc.propertyNames.size();j++) {
-      *(float*)&pc.data[ofs] = kpc.properties[i][j]; ofs += 4;
+      *(float*)&pc.data[ofs] = kpc.properties(i,j); ofs += 4;
     }
   }
   return true;
@@ -1360,7 +1369,8 @@ bool ROSToKlampt(const trajectory_msgs::msg::JointTrajectory& traj,LinearPath& k
   kpath.times.resize(traj.points.size());
   kpath.milestones.resize(traj.points.size());
   for(size_t i=0;i<traj.points.size();i++) {
-    kpath.times[i] = traj.points[i].time_from_start.toSec();
+    kpath.times[i] = traj.points[i].time_from_start.sec +
+      traj.points[i].time_from_start.nanosec*1e-9;
     kpath.milestones[i] = traj.points[i].positions;
   }
   return true;
@@ -1378,7 +1388,10 @@ bool KlamptToROS(const LinearPath& kpath,trajectory_msgs::msg::JointTrajectory& 
     traj.joint_names[i] = '0'+i;
   traj.points.resize(kpath.milestones.size());
   for(size_t i=0;i<kpath.milestones.size();i++) {
-    traj.points[i].time_from_start = rclcpp::Duration::from_seconds(kpath.times[i]).to_msg();
+    builtin_interfaces::msg::Duration duration;
+    duration.sec = (int32_t)kpath.times[i];
+    duration.nanosec = (uint32_t)((kpath.times[i]-floor(kpath.times[i]))*1e9);
+    traj.points[i].time_from_start = duration;
     traj.points[i].positions = kpath.milestones[i];
   }
   return true;
@@ -1398,7 +1411,10 @@ bool KlamptToROS(const RobotModel& robot,const LinearPath& kpath,trajectory_msgs
   traj.joint_names = robot.linkNames;
   traj.points.resize(kpath.milestones.size());
   for(size_t i=0;i<kpath.milestones.size();i++) {
-    traj.points[i].time_from_start = rclcpp::Duration::from_seconds(kpath.times[i]).to_msg();
+    builtin_interfaces::msg::Duration duration;
+    duration.sec = (int32_t)kpath.times[i];
+    duration.nanosec = (uint32_t)((kpath.times[i]-floor(kpath.times[i]))*1e9);
+    traj.points[i].time_from_start = duration;
     traj.points[i].positions = kpath.milestones[i];
   }
   return true;
@@ -1425,7 +1441,10 @@ bool KlamptToROS(const RobotModel& robot,const vector<int>& indices,const Linear
   }
   traj.points.resize(kpath.milestones.size());
   for(size_t i=0;i<kpath.milestones.size();i++) {
-    traj.points[i].time_from_start = rclcpp::Duration::from_seconds(kpath.times[i]).to_msg();
+    builtin_interfaces::msg::Duration duration;
+    duration.sec = (int32_t)kpath.times[i];
+    duration.nanosec = (uint32_t)((kpath.times[i]-floor(kpath.times[i]))*1e9);
+    traj.points[i].time_from_start = duration;
     traj.points[i].positions = kpath.milestones[i];
   }
   return true;
@@ -1511,7 +1530,7 @@ bool ROSToKlampt(const sensor_msgs::msg::PointCloud2& pc,Meshing::PointCloud3D& 
   }
   kpc.points.resize(0);
   kpc.propertyNames.resize(0);
-  kpc.properties.resize(0);
+  kpc.properties.clear();
   bool swap_bigendian = (IsBigEndian() != pc.is_bigendian);
   for(size_t i=0;i<pc.fields.size();i++) {
     if(pc.fields[i].name == "x") { xfield=(int)i; Assert(pc.fields[i].count==1); }
@@ -1538,7 +1557,8 @@ bool ROSToKlampt(const sensor_msgs::msg::PointCloud2& pc,Meshing::PointCloud3D& 
   Assert(pc.data.size() >= pc.row_step*pc.height);
   int ofs = 0;
   Vector3 pt(0.0);
-  Vector propertyTemp(kpc.propertyNames.size());
+  Vector propertyTemp;
+  vector<Vector> propertyRows;
   for(unsigned int i=0;i<pc.height;i++) {
     int vofs = ofs;
     for(unsigned int j=0;j<pc.width;j++) {
@@ -1554,17 +1574,24 @@ bool ROSToKlampt(const sensor_msgs::msg::PointCloud2& pc,Meshing::PointCloud3D& 
           Real* out = &propertyTemp[rgbproperty];
           *out = Real(rgb);
         }
+        propertyTemp.resize(kpc.propertyNames.size());
         int pofs = 0;
         for(size_t k=0;k<pc.fields.size();k++) {
           if(fieldmap[k] < 0) continue;
           UNPACK<Real>(pc.fields[k],&pc.data[vofs],&propertyTemp[pofs],swap_bigendian);
           pofs +=pc.fields[k].count;
         }
-        kpc.properties.push_back(propertyTemp);
+        propertyRows.push_back(propertyTemp);
       }
       vofs += pc.point_step;
     }
     ofs += pc.row_step;
+  }
+  kpc.properties.resize(propertyRows.size(),kpc.propertyNames.size());
+  for(size_t i=0;i<propertyRows.size();i++) {
+    for(int j=0;j<propertyRows[i].n;j++) {
+      kpc.properties(i,j) = propertyRows[i][j];
+    }
   }
   //printf("Read %d points from ROS\n",kpc.points.size());
   return true;
@@ -1601,7 +1628,7 @@ bool KlamptToROS(const Meshing::PointCloud3D& kpc,sensor_msgs::msg::PointCloud2&
     *(float*)&pc.data[ofs] = kpc.points[i].y; ofs += 4;
     *(float*)&pc.data[ofs] = kpc.points[i].z; ofs += 4;
     for(size_t j=0;j<kpc.propertyNames.size();j++) {
-      *(float*)&pc.data[ofs] = kpc.properties[i][j]; ofs += 4;
+      *(float*)&pc.data[ofs] = kpc.properties(i,j); ofs += 4;
     }
   }
   return true;
@@ -1626,7 +1653,9 @@ bool ROSToKlampt(const geometry_msgs::msg::TransformStamped& T,RigidTransform& k
 
 bool KlamptToROS(const RigidTransform& kT,geometry_msgs::msg::Transform& T)
 {
-  KlamptToROS(kT.t,T.translation);
+  T.translation.x = kT.t.x;
+  T.translation.y = kT.t.y;
+  T.translation.z = kT.t.z;
   KlamptToROS(kT.R,T.rotation);
   return true;
 }
@@ -2079,24 +2108,24 @@ void KlamptToROSCameraInfo(const CameraSensor& cam,sensor_msgs::msg::CameraInfo&
   msg.width = cam.xres;
   msg.height = cam.yres;
   msg.distortion_model = "plumb_bob";
-  msg.D.resize(5,0.0);
+  msg.d.resize(5,0.0);
   Real fx = 0.5*cam.xres/Tan(cam.xfov*0.5);
   Real fy = 0.5*cam.yres/Tan(cam.yfov*0.5);
   Real cx = 0.5*cam.xres;
   Real cy = 0.5*cam.yres;
-  msg.K[0] = fx;
-  msg.K[4] = fy;
-  msg.K[8] = 1;
-  msg.K[3] = cx;
-  msg.K[7] = cy;
-  msg.R[0] = 1;
-  msg.R[4] = 1;
-  msg.R[8] = 1;
-  msg.P[0] = fx;
-  msg.P[5] = fy;
-  msg.P[10] = 1;
-  msg.P[3] = cx;
-  msg.P[8] = cy;
+  msg.k[0] = fx;
+  msg.k[4] = fy;
+  msg.k[8] = 1;
+  msg.k[3] = cx;
+  msg.k[7] = cy;
+  msg.r[0] = 1;
+  msg.r[4] = 1;
+  msg.r[8] = 1;
+  msg.p[0] = fx;
+  msg.p[5] = fy;
+  msg.p[10] = 1;
+  msg.p[3] = cx;
+  msg.p[8] = cy;
 }
 
 

@@ -39,17 +39,18 @@ SET(DEPS ${DEPS} ${KLAMPT_LIBRARIES} Klampt)
 IF(PYTHON3)
 
   MESSAGE(STATUS "Configuring Python/setup.py from Python/setup.py.in")
-  configure_file(setup.py.in setup.py)
+  configure_file(setup.py.in setup.py @ONLY)
+  configure_file(setup.py.in ${CMAKE_CURRENT_SOURCE_DIR}/setup.py @ONLY)
   SET(OUTPUT CMakeFiles)
   MESSAGE(STATUS "Setting up Python/klampt/version.py to ${KLAMPT_VERSION}")
   FILE(WRITE klampt/version.py "__version__ = '${KLAMPT_VERSION}'")
 
   add_custom_command(
     OUTPUT ${OUTPUT}/python_timestamp
-    COMMAND rm -rf build/
-    COMMAND ${PYTHON3} -m pip install .
+    COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR} ${PYTHON3} -m pip install --no-build-isolation .
     COMMAND ${CMAKE_COMMAND} -E touch ${TEMPOUTPUT}/python_timestamp
     DEPENDS ${DEPS}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   )
   add_custom_command(
     OUTPUT ${OUTPUT}/python_docs_timestamp

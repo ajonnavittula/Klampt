@@ -107,6 +107,7 @@ if(KLAMPT_ROS_VERSION STREQUAL "ROS2" OR KLAMPT_ROS_VERSION STREQUAL "AUTO")
     find_package(tf2 REQUIRED)
     find_package(tf2_ros REQUIRED)
     find_package(tf2_geometry_msgs REQUIRED)
+    find_package(rosidl_typesupport_cpp REQUIRED)
     list(APPEND KLAMPT_INCLUDE_DIRS
       ${rclcpp_INCLUDE_DIRS}
       ${std_msgs_INCLUDE_DIRS}
@@ -121,9 +122,25 @@ if(KLAMPT_ROS_VERSION STREQUAL "ROS2" OR KLAMPT_ROS_VERSION STREQUAL "AUTO")
     else()
       list(APPEND KLAMPT_LIBRARIES ${rclcpp_LIBRARIES})
     endif()
-    foreach(_pkg std_msgs geometry_msgs sensor_msgs trajectory_msgs tf2 tf2_ros tf2_geometry_msgs)
+    foreach(_pkg
+        builtin_interfaces
+        std_msgs
+        geometry_msgs
+        sensor_msgs
+        trajectory_msgs
+        tf2
+        tf2_ros
+        tf2_geometry_msgs
+        rosgraph_msgs
+        statistics_msgs
+        action_msgs
+        unique_identifier_msgs
+        rosidl_typesupport_cpp)
       if(TARGET ${_pkg}::${_pkg})
         list(APPEND KLAMPT_LIBRARIES ${_pkg}::${_pkg})
+      endif()
+      if(TARGET ${_pkg}::${_pkg}__rosidl_typesupport_cpp)
+        list(APPEND KLAMPT_LIBRARIES ${_pkg}::${_pkg}__rosidl_typesupport_cpp)
       endif()
     endforeach()
     list(APPEND KLAMPT_DEFINITIONS "-DHAVE_ROS2=1")

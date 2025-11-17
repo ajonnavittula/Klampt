@@ -28,6 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     autoconf \
     automake \
     libtool \
+    qtbase5-dev \
+    libqt5opengl5-dev \
  && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m pip install --upgrade pip && \
@@ -40,6 +42,14 @@ RUN git clone https://github.com/krishauser/KrisLibrary.git /tmp/KrisLibrary && 
     cmake -S /tmp/KrisLibrary -B /tmp/KrisLibrary/build -DCMAKE_BUILD_TYPE=Release && \
     cmake --build /tmp/KrisLibrary/build --target install -- -j$(nproc) && \
     rm -rf /tmp/KrisLibrary
+
+# Build and install the bundled ODE dependency
+COPY Cpp/Dependencies/ode-0.14 /tmp/ode-0.14
+RUN cd /tmp/ode-0.14 && \
+    ./configure --enable-double-precision --disable-demos && \
+    make -j$(nproc) && \
+    make install && \
+    rm -rf /tmp/ode-0.14
 
 WORKDIR /workspace
 

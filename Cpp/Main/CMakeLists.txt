@@ -106,4 +106,3 @@ endforeach()
 
 ADD_CUSTOM_TARGET(apps ALL
 		DEPENDS ${APPS})
-

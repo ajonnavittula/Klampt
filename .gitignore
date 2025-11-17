@@ -88,6 +88,7 @@ Cpp/Dependencies/glui*
 Cpp/Dependencies/glew*
 Cpp/Dependencies/ode*
 build/
+*.egg-info/
 
 #visual studio code
 .vscode
@@ -98,3 +99,4 @@ cmake_install.cmake
 install_manifest.txt
 CPackConfig.cmake
 CPackSourceConfig.cmake
+/Python/setup.py

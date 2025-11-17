@@ -9,4 +9,4 @@ services:
       - .:/workspace:rw
     environment:
       - ROS_DOMAIN_ID=0
-    command: bash
+    command: /bin/bash -lc "source /opt/ros/humble/setup.bash && bash"
