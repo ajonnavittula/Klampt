@@ -11,6 +11,45 @@ except ImportError:
     print('Building Klampt from source requires numpy (python executable: %s).  Try "pip install numpy". Exiting.' % sys.executable)
     exit(1)
 
+ament_prefix_paths = [p for p in os.environ.get('AMENT_PREFIX_PATH', '').split(os.pathsep) if p]
+try:
+    from ament_index_python.packages import get_package_prefix, PackageNotFoundError
+except ImportError:
+    get_package_prefix = None
+    class PackageNotFoundError(Exception):
+        pass
+
+def resolve_ros2_target(target, libs_out, libdirs_out):
+    package, libname = target.split('::', 1)
+    search_prefixes = []
+    if get_package_prefix is not None:
+        try:
+            prefix = get_package_prefix(package)
+            if prefix:
+                search_prefixes.append(prefix)
+        except PackageNotFoundError:
+            pass
+    for prefix in ament_prefix_paths:
+        if prefix and prefix not in search_prefixes:
+            search_prefixes.append(prefix)
+    lib_subdirs = ('lib', 'lib64', os.path.join('lib', 'x86_64-linux-gnu'))
+    lib_exts = ('.so', '.a', '.dylib', '.lib')
+    for prefix in search_prefixes:
+        for subdir in lib_subdirs:
+            libdir = os.path.join(prefix, subdir)
+            if not os.path.isdir(libdir):
+                continue
+            for ext in lib_exts:
+                lib_path = os.path.join(libdir, 'lib' + libname + ext)
+                if os.path.isfile(lib_path):
+                    if libdir not in libdirs_out:
+                        libdirs_out.append(libdir)
+                    if libname not in libs_out:
+                        libs_out.append(libname)
+                    return True
+    print("Warning: Unable to locate ROS 2 library %s (from %s)" % (libname, target))
+    return False
+
 src_folder = "klampt/src"
 root_py_folder = "klampt"
 klampt_packages = ['klampt','klampt.apps', 'klampt.control', 'klampt.control.io', 'klampt.control.blocks', 'klampt.io', 'klampt.math', 'klampt.math.autodiff', 'klampt.model', 'klampt.model.create', 'klampt.plan','klampt.plan.kinetrajopt', 'klampt.sim', 'klampt.vis', 'klampt.vis.ipython', 'klampt.vis.backends']
@@ -45,6 +84,7 @@ for l in libs:
             libnames.append(fn)
     else:
         if '::' in fn:
+            resolve_ros2_target(fn, libnames, libdirs)
             continue
         if fn.startswith('lib') and fn.count('.')>0:
             libnames.append(fn.split('.')[0][3:])
