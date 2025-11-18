@@ -31,7 +31,8 @@ find_program(PYTHON "python")
 find_program(PYTHON2 "python2")
 find_program(PYTHON3 "python3")
 
-SET(TEMPOUTPUT CMakeFiles)
+set(TEMPOUTPUT ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles)
+file(MAKE_DIRECTORY ${TEMPOUTPUT})
 #make these dependent on all klampt module source files, Klampt, and Klampt's dependency libraries
 FILE(GLOB DEPS klampt/src/*.h klampt/src/*.cpp klampt/*.py)
 SET(DEPS ${DEPS} ${KLAMPT_LIBRARIES} Klampt)
@@ -41,24 +42,25 @@ IF(PYTHON3)
   MESSAGE(STATUS "Configuring Python/setup.py from Python/setup.py.in")
   configure_file(setup.py.in setup.py @ONLY)
   configure_file(setup.py.in ${CMAKE_CURRENT_SOURCE_DIR}/setup.py @ONLY)
-  SET(OUTPUT CMakeFiles)
+  set(PYTHON_TIMESTAMP_FILE ${TEMPOUTPUT}/python_timestamp)
+  set(PYTHON_DOCS_TIMESTAMP_FILE ${TEMPOUTPUT}/python_docs_timestamp)
   MESSAGE(STATUS "Setting up Python/klampt/version.py to ${KLAMPT_VERSION}")
   FILE(WRITE klampt/version.py "__version__ = '${KLAMPT_VERSION}'")
 
   add_custom_command(
-    OUTPUT ${OUTPUT}/python_timestamp
+    OUTPUT ${PYTHON_TIMESTAMP_FILE}
     COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR} ${PYTHON3} -m pip install --no-build-isolation .
-    COMMAND ${CMAKE_COMMAND} -E touch ${TEMPOUTPUT}/python_timestamp
+    COMMAND ${CMAKE_COMMAND} -E touch ${PYTHON_TIMESTAMP_FILE}
     DEPENDS ${DEPS}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   )
   add_custom_command(
-    OUTPUT ${OUTPUT}/python_docs_timestamp
+    OUTPUT ${PYTHON_DOCS_TIMESTAMP_FILE}
     COMMAND doxygen klampt/doxygen.conf
-    COMMAND ${CMAKE_COMMAND} -E touch ${TEMPOUTPUT}/python_docs_timestamp
+    COMMAND ${CMAKE_COMMAND} -E touch ${PYTHON_DOCS_TIMESTAMP_FILE}
     DEPENDS ${DEPS}
   )
-  add_custom_target(python ALL DEPENDS ${OUTPUT}/python_timestamp)
-  add_custom_target(python-docs DEPENDS ${OUTPUT}/python_docs_timestamp)
+  add_custom_target(python ALL DEPENDS ${PYTHON_TIMESTAMP_FILE})
+  add_custom_target(python-docs DEPENDS ${PYTHON_DOCS_TIMESTAMP_FILE})
 
 ENDIF(PYTHON3)

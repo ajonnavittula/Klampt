@@ -44,6 +44,8 @@ for l in libs:
         else:
             libnames.append(fn)
     else:
+        if '::' in fn:
+            continue
         if fn.startswith('lib') and fn.count('.')>0:
             libnames.append(fn.split('.')[0][3:])
         else:
