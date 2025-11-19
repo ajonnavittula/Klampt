@@ -57,6 +57,9 @@ RUN git clone https://github.com/krishauser/KrisLibrary.git /opt/KrisLibrary \
     && cmake -S /opt/KrisLibrary -B /opt/KrisLibrary/build -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /opt/KrisLibrary/build --target install -- -j$(nproc)
 
+ENV CMAKE_PREFIX_PATH=/usr/local:${CMAKE_PREFIX_PATH}
+ENV CMAKE_MODULE_PATH=/opt/KrisLibrary/CMakeModules:${CMAKE_MODULE_PATH}
+
 # Build and install the bundled ODE dependency
 COPY Cpp/Dependencies/ode-0.14 /tmp/ode-0.14
 RUN cd /tmp/ode-0.14 && \
@@ -71,10 +74,14 @@ ENV LD_LIBRARY_PATH=/usr/local/lib:/opt/ros/humble/lib:${LD_LIBRARY_PATH}
 # Copy Klampt source code
 COPY . /opt/Klampt
 
+# Create symlink so Klampt can find KrisLibrary where it expects it
+RUN ln -s /opt/KrisLibrary /opt/Klampt/Cpp/Dependencies/KrisLibrary
+
 # Build Klampt C++ library and Python bindings
 RUN cd /opt/Klampt && \
     mkdir -p build && cd build && \
-    cmake .. -DKLAMPT_ROS_VERSION=ROS2 -DCMAKE_BUILD_TYPE=Release && \
+    cmake .. -DKLAMPT_ROS_VERSION=ROS2 \
+             -DCMAKE_BUILD_TYPE=Release && \
     make -j$(nproc) && \
     make python
 
