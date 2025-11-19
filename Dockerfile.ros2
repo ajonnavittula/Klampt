@@ -67,6 +67,20 @@ RUN cd /tmp/ode-0.14 && \
 ENV AMENT_PREFIX_PATH=/opt/ros/humble
 ENV LD_LIBRARY_PATH=/usr/local/lib:/opt/ros/humble/lib:${LD_LIBRARY_PATH}
 
+# Copy Klampt source code
+COPY . /opt/Klampt
+
+# Build Klampt C++ library and Python bindings
+RUN cd /opt/Klampt && \
+    mkdir -p build && cd build && \
+    cmake .. -DKLAMPT_ROS_VERSION=ROS2 -DCMAKE_BUILD_TYPE=Release && \
+    make -j$(nproc) && \
+    make python
+
+# Set Python environment variable for the build
+ENV PYTHON3=/usr/bin/python3
+
+# Create workspace directory for user code
 WORKDIR /workspace
 
 COPY docker/entrypoint.sh /entrypoint.sh

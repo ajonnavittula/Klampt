@@ -2,11 +2,31 @@ version: '3.8'
 
 services:
   klampt-ros2:
+    container_name: ${KLAMPT_CONTAINER_NAME:-klampt-ros2}
+    image: klampt-ros2:latest
     build:
       context: .
       dockerfile: Dockerfile.ros2
     volumes:
       - .:/workspace:rw
+      - type: bind
+        source: ${KLAMPT_TMP_DIR:-/tmp/klampt-docker}
+        target: /tmp/klampt-docker
+      - type: bind
+        source: /tmp/.X11-unix
+        target: /tmp/.X11-unix
+      - type: bind
+        source: /etc/localtime
+        target: /etc/localtime
+        read_only: true
+      - type: bind
+        source: ${KLAMPT_XAUTH:-/tmp/klampt-docker/.docker.xauth}
+        target: /tmp/.docker.xauth
+        read_only: true
     environment:
       - ROS_DOMAIN_ID=0
+      - DISPLAY
+      - TERM
+      - QT_X11_NO_MITSHM=1
+      - XAUTHORITY=/tmp/.docker.xauth
     command: /bin/bash -lc "source /opt/ros/humble/setup.bash && bash"

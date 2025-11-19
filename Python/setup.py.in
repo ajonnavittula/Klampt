@@ -92,6 +92,11 @@ for l in libs:
             libnames.append(fn)
 libs = libnames
 
+# Add rpath for all library directories to ensure they can be found at runtime
+if sys.platform != 'win32':
+    for libdir in libdirs:
+        extra_link_args.append(f'-Wl,-rpath,{libdir}')
+
 #Parse definitions
 commondefines = []
 #split whitespace

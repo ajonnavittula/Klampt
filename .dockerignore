@@ -1,0 +1,45 @@
+# Build artifacts
+build/
+*.pyc
+__pycache__/
+*.so
+*.o
+*.a
+.cache/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Documentation
+*.md
+docs/
+Documentation/
+
+# Tests
+tests/
+
+# Docker files (we're already in Docker build)
+docker-compose.yml
+Dockerfile*
+
+# CI/CD
+.travis.yml
+.github/
+
+# Python
+*.egg-info/
+dist/
+*.egg
+.pytest_cache/
+
+# Misc
+*.log
+.DS_Store
