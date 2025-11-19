@@ -44,6 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libtool \
     qtbase5-dev \
     libqt5opengl5-dev \
+    libxcb-cursor0 \
  && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m pip install --upgrade pip && \
@@ -79,6 +80,9 @@ RUN cd /opt/Klampt && \
 
 # Set Python environment variable for the build
 ENV PYTHON3=/usr/bin/python3
+
+# pip installs
+RUN python3 -m pip install PyQt6 pillow
 
 # Create workspace directory for user code
 WORKDIR /workspace

@@ -23,10 +23,13 @@ services:
         source: ${KLAMPT_XAUTH:-/tmp/klampt-docker/.docker.xauth}
         target: /tmp/.docker.xauth
         read_only: true
+    runtime: nvidia
     environment:
       - ROS_DOMAIN_ID=0
       - DISPLAY
       - TERM
       - QT_X11_NO_MITSHM=1
       - XAUTHORITY=/tmp/.docker.xauth
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=graphics,utility,compute
     command: /bin/bash -lc "source /opt/ros/humble/setup.bash && bash"
